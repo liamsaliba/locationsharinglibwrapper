@@ -49,6 +49,7 @@ while True:
 	i = input("x to exit, anything to refresh > ")
 	if i == 'x':
 		break
+	print("\n\n")
 	fe.update()
 
 print("\n(Exiting...)")
