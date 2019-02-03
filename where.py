@@ -4,9 +4,16 @@ Liam Saliba
 2018-06-24, 2019-01-29, 2019-02-02
 """
 from locationsharinglib import Service
+from geopy.geocoders import Nominatim
+from geopy import distance
+import requests
+import json
 import math
 import getpass
 import datetime
+import os
+
+geolocator = Nominatim(user_agent="whereis-friend")
 
 def get_time_displacement(dt):
     delta = datetime.datetime.now(dt.tzinfo) - dt
@@ -24,15 +31,6 @@ def get_time_displacement(dt):
     return "long ago"
     #return dt
 
-def dist(c1, c2):
-    """ Calculates the distance between two coordinates (lat, long) using the haversine formula """
-    R = 6371e3 # meters
-    lat1 = math.radians(c1[0])
-    lat2 = math.radians(c2[0])
-    latd = math.radians(c2[0]-c1[0])
-    lond = math.radians(c2[1]-c1[1])
-    return 2*R*math.asin(math.sqrt(math.sin(latd/2)*math.sin(latd/2)+math.cos(lat1)*math.cos(lat2)*math.sin(lond/2)*math.sin(lond/2)))
-
 LOCATION_AWAY = "AWAY"
 LOCATION_HOME = "HOME"
 LOCATION_HOME_YOU = "HOME YOU"
@@ -43,7 +41,7 @@ FNAME = "save.dat"
 
 class Person:
     def __init__(self, person, you=None, home=None):
-        self.id = person._id
+        self.id = person.id
         self.home = home
 
         self.picture_url = None
@@ -51,6 +49,7 @@ class Person:
         self.nickname = None
         self.latitude = None
         self.longitude = None
+        self.location = None
         self.datetime = None
         self.accuracy = None
         self.address = None
@@ -68,20 +67,26 @@ class Person:
         self.nickname = person.nickname
         self.latitude = person.latitude
         self.longitude = person.longitude
+        #self.location = geolocator.reverse(self.loc)
+        #print(self.location.raw)
         self.datetime = person.datetime
         self.accuracy = person.accuracy
         self.address = person.address
         self.country_code = person.country_code
         self.charging = person.charging
         self.battery_level = person.battery_level
-        self.history.append({'loc': list(self.loc), 'dt': self.datetime})
+        self.history.append({'loc': self.loc, 'dt': self.datetime})
 
         if you is not None:
-            self.set_distance(you)
+            self.distance = self.distance_to(you)
+
+    def distance_to(self, other):
+        """ returns distance in metres to other person or latitude/longitude """
+        return distance.distance(self.loc, other if type(other) in [tuple, list] else other.loc).m
 
     @property
     def loc(self):
-        if self.latitude is None:
+        if self.latitude == None:
             return None
         return (self.latitude, self.longitude)
 
@@ -89,7 +94,7 @@ class Person:
     def at_home(self):
         if self.home is None:
             return False
-        return dist(self.loc, self.home) <= HOME_THRESH
+        return self.distance_to(self.home) <= HOME_THRESH
 
     @property
     def status(self):
@@ -100,9 +105,6 @@ class Person:
         if self.at_home:
             return LOCATION_HOME
         return LOCATION_AWAY
-
-    def set_distance(self, you):
-        self.distance = dist(self.loc, you.loc)
 
     def set_home(self, dest=None):
         if dest is not None:
@@ -132,6 +134,13 @@ class Person:
     def print(self):
         print(self.get_info_str())
 
+    def serialise(self):
+        # no need to save if home hasn't been set
+        if self.home is None:
+            return None
+        print(self.id)
+        return "{},{},{}\n".format(self.id, self.home[0], self.home[1])
+
     def __str__(self):
         return "{} ({}) at {} ({}, {})".format(self.full_name, self.nickname, self.address, self.latitude, self.longitude)
 
@@ -140,20 +149,38 @@ class Person:
 
 class You(Person):
     def get_info_str(self):
-        return "You are at %s.   (%s)" % (self.address, get_time_displacement(self.datetime))
+        place = ""
+        if self.at_home:
+            place += "home: "
+        place += self.address
+        return "You are at %s.   (%s)" % (place, get_time_displacement(self.datetime))
 
     def __repr__(self):
         return "You ({}) {}".format(self.id, str(self))
 
 class FrontEnd:
-    def __init__(self, username, password, fname=None):
+    def __init__(self, username, password):
         self.service = Service(username, password)
         print("Authenticated.\n")
         self.now = None
         self.you = None
         self.people = []
         self.person_d = {}
+        self.load()
         self.update()
+
+    def load(self):
+        if not os.path.isfile(FNAME):
+            return
+        for line in open(FNAME, 'r'):
+            parts = line.split(",")
+            if len(parts) != 3:
+                continue
+            pid, lat, lon = parts
+            home = (float(lat), float(lon))
+            self.person_d[pid] = home
+        print("Loaded.")
+
 
     def update(self):
         print("Updating...\n")
@@ -198,18 +225,29 @@ class FrontEnd:
         print("(Refreshed at %s.)" % self.now.strftime('%Y-%m-%d %H:%M:%S'))
 
     def set_home(self, i):
-        if i == 0:
-            self.you.set_home()
         if i > len(self.people):
             return
-        i -= 1
-        self.people[i].set_home()
+        if i == 0:
+            self.you.set_home()
+        else:
+            i -= 1
+            self.people[i].set_home()
+        self.save()
+
+    def save(self):
+        f = open(FNAME, "w")
+        for p in self.person_d.values():
+            x = p.serialise()
+            if x is not None:
+                f.write(x)
+
+
 
 print("whereis --- \nEnter Google account login...")
 username = input("Username: ")
 password = getpass.getpass("Password: ")
 
-fe = FrontEnd(username, password, FNAME)
+fe = FrontEnd(username, password)
 
 while True:
     fe.print_all()
@@ -217,13 +255,10 @@ while True:
     if i == "x" or i == 'exit':
         break
     cmds = i.split()
-    if len(cmds) > 0 and cmds[0] == "sethome" and cmds[1].isnumeric():
+    if len(cmds) > 0 and (cmds[0] == "sethome" or cmds[0] == 's') and cmds[1].isnumeric():
         fe.set_home(int(cmds[1]))
     else:
         fe.update()
     print("")
 
 print("Exiting...\n")
-
-#save(FNAME)
-#for person in people
