@@ -12,6 +12,8 @@ import math
 import getpass
 import datetime
 import os
+from threading import Timer
+
 
 geolocator = Nominatim(user_agent="whereis-friend")
 
@@ -38,6 +40,7 @@ LOCATION_YOU = "YOU"
 YOU_THRESH = 50
 HOME_THRESH = 150
 FNAME = "save.dat"
+POLLING_DURATION = 30
 
 class Person:
     def __init__(self, person, you=None, home=None):
@@ -138,7 +141,6 @@ class Person:
         # no need to save if home hasn't been set
         if self.home is None:
             return None
-        print(self.id)
         return "{},{},{}\n".format(self.id, self.home[0], self.home[1])
 
     def __str__(self):
@@ -169,6 +171,9 @@ class FrontEnd:
         self.load()
         self.update()
 
+        t = Timer(POLLING_DURATION, self.update)
+        t.start()
+
     def load(self):
         if not os.path.isfile(FNAME):
             return
@@ -183,9 +188,9 @@ class FrontEnd:
 
 
     def update(self):
-        print("Updating...\n")
-        you = self.service.get_authenticated_person()
         self.now = datetime.datetime.now()
+        print("Updating... (%s)\n" % self.now.strftime("%H:%M"))
+        you = self.service.get_authenticated_person()
 
         if you.id in self.person_d.keys():
             # both 'homes' and people stored in the person dictionary
