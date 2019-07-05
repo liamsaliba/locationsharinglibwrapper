@@ -1,0 +1,8 @@
+TODO:
+
+Where's my home?
+Where's $person's home?
+How far away is $person?
+What's the traffic like to there?
+Aliases.
+Maybe additional homes (other people's homes)

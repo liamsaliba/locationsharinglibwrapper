@@ -102,3 +102,8 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+save.dat
+location_sharing.cookies
+getcookie.bat
+save2.dat
